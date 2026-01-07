@@ -1,0 +1,75 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Large model files (download separately)
+DECA/data/deca_model.pkl
+DECA/data/generic_model.pkl
+DECA/data/*.pkl
+DECA/FLAME2020/*.pkl
+*.pth
+*.tar
+
+# Redundant DECA copy
+DECA/deca_original_repo/
+
+# Logs and training artifacts
+DECA/logs/
+*.log
+*.tfevents.*
+
+# Results (optional - uncomment if you want to track results)
+# results/
+
+# Temporary files
+*.tmp
+*.temp
+temp_*/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+__MACOSX/
+._*
+
+# Downloaded model cache files
+*.partial
+
+# CPAP Template PDFs (large files)
+# CPAP Template PDFs/
+

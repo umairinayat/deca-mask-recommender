@@ -1,0 +1,18 @@
+{
+  "timestamp": "2026-01-07T22:01:16.634861",
+  "measurement_number": 8,
+  "measurements": {
+    "nose_width": 0.2146829068660736,
+    "cheekbone_width": 0.055768344551324844,
+    "nose_to_chin": 0.003193809185177088
+  },
+  "processing_time_seconds": 0.43492960929870605,
+  "vertex_indices": {
+    "nose_left": 3632,
+    "nose_right": 3325,
+    "cheek_left": 4478,
+    "cheek_right": 2051,
+    "nose_base": 175,
+    "chin": 152
+  }
+}
