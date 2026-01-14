@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-01-08T21:16:17.495985",
+  "measurement_number": 13,
+  "measurements_mm": {
+    "nose_width": 50.05261179606938,
+    "cheekbone_width": 232.78609567731885,
+    "nose_to_chin": 150.3850697194238
+  },
+  "measurements_flame": {
+    "nose_width": 0.20324735343456268,
+    "cheekbone_width": 0.9452685117721558,
+    "nose_to_chin": 0.6106647849082947
+  },
+  "calibration": {
+    "ipd_mm": 63.0,
+    "conversion_factor": 246.2645193172676
+  },
+  "processing_time_seconds": 0.12452054023742676,
+  "landmark_indices": {
+    "nose_left": 31,
+    "nose_right": 35,
+    "cheek_left": 4,
+    "cheek_right": 12,
+    "subnasale": 33,
+    "chin": 8
+  }
+}

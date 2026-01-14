@@ -23,18 +23,19 @@ class DECALiveDemo:
         print("🔥 Initializing DECA Live Demo...")
         
         try:
-            from decalib.deca import DECA
+            # Use DECAMeasurement instead of DECA to avoid C++ compilation
+            from decalib.deca_measurement import DECAMeasurement
             from decalib.utils.config import cfg as deca_cfg
             import face_alignment
             
             # Configure DECA
             deca_cfg.model.use_tex = False  # Disable texture for speed
-            deca_cfg.rasterizer_type = 'pytorch3d'
+            # No need to set rasterizer_type - DECAMeasurement doesn't use rendering
             
-            # Initialize DECA
-            print("🔄 Loading DECA model...")
-            self.deca = DECA(config=deca_cfg, device=self.device)
-            print(" DECA model loaded")
+            # Initialize DECA (measurement-only mode - no C++ compilation needed!)
+            print("🔄 Loading DECA model (measurement mode)...")
+            self.deca = DECAMeasurement(config=deca_cfg, device=self.device)
+            print("✅ DECA model loaded")
             
             # Initialize face detector
             print("🔄 Loading face detector...")
@@ -43,7 +44,7 @@ class DECALiveDemo:
                 flip_input=False, 
                 device=self.device
             )
-            print(" Face detector loaded")
+            print("✅ Face detector loaded")
             
             return True
             
@@ -78,23 +79,106 @@ class DECALiveDemo:
         
         return face_tensor, (x_min, y_min, x_max, y_max)
     
-    def extract_measurements(self, vertices):
-        """Extract face measurements from 3D vertices"""
-        # Vertices shape: (5023, 3) - (x, y, z) coordinates
-        x_coords = vertices[:, 0]  # Width (left-right)
-        y_coords = vertices[:, 1]  # Height (up-down)
-        z_coords = vertices[:, 2]  # Depth (front-back)
+    # ============ CONFIGURABLE PARAMETERS ============
+    # Set YOUR actual IPD (inter-pupillary distance) in mm for accurate measurements
+    # Measure with a ruler: distance between your left and right pupil centers
+    # Average adult IPD is 63mm, but ranges from 54-74mm
+    YOUR_IPD_MM = 63.0  # <-- CHANGE THIS TO YOUR MEASURED IPD!
+    
+    # 68-Point Landmark indices for measurements
+    LMK_NOSE_LEFT = 31       # Left alar (nostril wing)
+    LMK_NOSE_RIGHT = 35      # Right alar (nostril wing)
+    LMK_NASION = 27          # Bridge of nose (between eyes)
+    LMK_PRONASALE = 30       # Nose tip
+    LMK_SUBNASALE = 33       # Nose base (under nose)
+    LMK_CHIN = 8             # Chin tip (menton)
+    LMK_LEFT_EYE_OUTER = 36  # Left eye outer corner
+    LMK_LEFT_EYE_INNER = 39  # Left eye inner corner
+    LMK_RIGHT_EYE_INNER = 42 # Right eye inner corner
+    LMK_RIGHT_EYE_OUTER = 45 # Right eye outer corner
+    
+    def extract_measurements(self, landmarks3d, vertices=None):
+        """
+        Extract accurate face measurements from 3D landmarks.
         
-        # Calculate face dimensions
-        face_width = np.max(x_coords) - np.min(x_coords)
-        face_height = np.max(y_coords) - np.min(y_coords)
-        face_depth = np.max(z_coords) - np.min(z_coords)
+        Args:
+            landmarks3d: (68, 3) numpy array of 3D landmark positions
+            vertices: (5023, 3) optional, for additional vertex-based measurements
+            
+        Returns:
+            dict with measurements in both FLAME units and millimeters
+        """
+        # ===== CALCULATE CONVERSION FACTOR USING IPD =====
+        # Use eye centers for more accurate IPD
+        left_eye_center = (landmarks3d[self.LMK_LEFT_EYE_OUTER] + landmarks3d[self.LMK_LEFT_EYE_INNER]) / 2
+        right_eye_center = (landmarks3d[self.LMK_RIGHT_EYE_INNER] + landmarks3d[self.LMK_RIGHT_EYE_OUTER]) / 2
+        ipd_flame = np.linalg.norm(left_eye_center - right_eye_center)
+        
+        # Conversion factor: mm per FLAME unit
+        conversion_factor = self.YOUR_IPD_MM / ipd_flame
+        
+        # ===== 1. NOSE WIDTH (Alar Base) =====
+        # Distance between outer edges of nostrils
+        nose_left = landmarks3d[self.LMK_NOSE_LEFT]
+        nose_right = landmarks3d[self.LMK_NOSE_RIGHT]
+        nose_width_flame = np.linalg.norm(nose_left - nose_right)
+        nose_width_mm = nose_width_flame * conversion_factor
+        
+        # ===== 2. DOWN NOSE DISTANCE (Nasion to Subnasale) =====
+        # Vertical length of nose from bridge to base
+        nasion = landmarks3d[self.LMK_NASION]
+        subnasale = landmarks3d[self.LMK_SUBNASALE]
+        down_nose_flame = np.linalg.norm(nasion - subnasale)
+        down_nose_mm = down_nose_flame * conversion_factor
+        
+        # ===== 3. NOSE HEIGHT (Tip Protrusion) =====
+        # How far the nose tip protrudes from face plane
+        pronasale = landmarks3d[self.LMK_PRONASALE]  # Nose tip
+        # Z-axis difference (depth protrusion)
+        nose_height_z_flame = abs(pronasale[2] - subnasale[2])
+        nose_height_z_mm = nose_height_z_flame * conversion_factor
+        # Full 3D distance from tip to base
+        nose_height_3d_flame = np.linalg.norm(pronasale - subnasale)
+        nose_height_3d_mm = nose_height_3d_flame * conversion_factor
+        
+        # ===== 4. NOSE TO CHIN (Lower Face Height) =====
+        chin = landmarks3d[self.LMK_CHIN]
+        nose_to_chin_flame = np.linalg.norm(subnasale - chin)
+        nose_to_chin_mm = nose_to_chin_flame * conversion_factor
+        
+        # ===== 5. FACE DIMENSIONS (from vertices if available) =====
+        if vertices is not None:
+            face_width_flame = np.max(vertices[:, 0]) - np.min(vertices[:, 0])
+            face_height_flame = np.max(vertices[:, 1]) - np.min(vertices[:, 1])
+            face_depth_flame = np.max(vertices[:, 2]) - np.min(vertices[:, 2])
+        else:
+            face_width_flame = face_height_flame = face_depth_flame = 0.0
         
         return {
-            'width': face_width,
-            'height': face_height,
-            'depth': face_depth,
-            'vertex_count': vertices.shape[0]
+            # Millimeter measurements (calibrated)
+            'nose_width_mm': round(nose_width_mm, 1),
+            'down_nose_mm': round(down_nose_mm, 1),
+            'nose_height_z_mm': round(nose_height_z_mm, 1),
+            'nose_height_3d_mm': round(nose_height_3d_mm, 1),
+            'nose_to_chin_mm': round(nose_to_chin_mm, 1),
+            
+            # Raw FLAME units (for debugging)
+            'nose_width_flame': nose_width_flame,
+            'down_nose_flame': down_nose_flame,
+            'nose_height_z_flame': nose_height_z_flame,
+            'nose_height_3d_flame': nose_height_3d_flame,
+            'nose_to_chin_flame': nose_to_chin_flame,
+            
+            # Face dimensions
+            'face_width_flame': face_width_flame,
+            'face_height_flame': face_height_flame,
+            'face_depth_flame': face_depth_flame,
+            
+            # Calibration info
+            'conversion_factor': conversion_factor,
+            'ipd_mm': self.YOUR_IPD_MM,
+            'ipd_flame': ipd_flame,
+            'vertex_count': vertices.shape[0] if vertices is not None else 0
         }
     
     def draw_measurements(self, frame, measurements, bbox, processing_time):
@@ -104,36 +188,39 @@ class DECALiveDemo:
         # Draw face bounding box
         cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
         
-        # Measurement text
+        # Measurement text - now in MILLIMETERS!
         text_lines = [
-            f"DECA 3D Measurements (FLAME units):",
-            f"Width:  {measurements['width']:.6f}",
-            f"Height: {measurements['height']:.6f}",
-            f"Depth:  {measurements['depth']:.6f}",
-            f"Vertices: {measurements['vertex_count']}",
+            f"Nose Measurements (mm) [IPD={measurements['ipd_mm']:.0f}mm]:",
+            f"Nose Width:       {measurements['nose_width_mm']:.1f} mm",
+            f"Down Nose Dist:   {measurements['down_nose_mm']:.1f} mm",
+            f"Nose Height (Z):  {measurements['nose_height_z_mm']:.1f} mm",
+            f"Nose Height (3D): {measurements['nose_height_3d_mm']:.1f} mm",
+            f"Nose to Chin:     {measurements['nose_to_chin_mm']:.1f} mm",
             f"Processing: {processing_time:.2f}s"
         ]
         
         # Draw text background
         text_height = 25
         bg_height = len(text_lines) * text_height + 10
-        cv2.rectangle(frame, (10, 10), (400, bg_height), (0, 0, 0), -1)
-        cv2.rectangle(frame, (10, 10), (400, bg_height), (0, 255, 0), 2)
+        cv2.rectangle(frame, (10, 10), (450, bg_height), (0, 0, 0), -1)
+        cv2.rectangle(frame, (10, 10), (450, bg_height), (0, 255, 0), 2)
         
         # Draw text
         for i, line in enumerate(text_lines):
             y_pos = 30 + i * text_height
             color = (0, 255, 255) if i == 0 else (255, 255, 255)
-            cv2.putText(frame, line, (15, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 1)
+            cv2.putText(frame, line, (15, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 1)
     
     def save_measurement(self, measurements):
         """Save measurement to history"""
         timestamp = datetime.now().strftime("%H:%M:%S")
         measurement_data = {
             'timestamp': timestamp,
-            'width': measurements['width'],
-            'height': measurements['height'],
-            'depth': measurements['depth']
+            'nose_width_mm': measurements['nose_width_mm'],
+            'down_nose_mm': measurements['down_nose_mm'],
+            'nose_height_z_mm': measurements['nose_height_z_mm'],
+            'nose_height_3d_mm': measurements['nose_height_3d_mm'],
+            'nose_to_chin_mm': measurements['nose_to_chin_mm']
         }
         self.measurement_history.append(measurement_data)
         
@@ -144,16 +231,17 @@ class DECALiveDemo:
     def print_statistics(self):
         """Print measurement statistics"""
         if len(self.measurement_history) < 2:
+            print("Need at least 2 measurements for statistics")
             return
-            
-        widths = [m['width'] for m in self.measurement_history]
-        heights = [m['height'] for m in self.measurement_history]
+        
+        nose_widths = [m['nose_width_mm'] for m in self.measurement_history]
+        down_noses = [m['down_nose_mm'] for m in self.measurement_history]
+        nose_heights = [m['nose_height_3d_mm'] for m in self.measurement_history]
         
         print(f"\n📊 Measurement Statistics (last {len(self.measurement_history)} measurements):")
-        print(f"   Width:  {np.mean(widths):.6f} ± {np.std(widths):.6f} FLAME units")
-        print(f"   Height: {np.mean(heights):.6f} ± {np.std(heights):.6f} FLAME units")
-        print(f"   Width CV: {(np.std(widths)/np.mean(widths)*100):.2f}%")
-        print(f"   Height CV: {(np.std(heights)/np.mean(heights)*100):.2f}%")
+        print(f"   Nose Width:     {np.mean(nose_widths):.1f} ± {np.std(nose_widths):.1f} mm  (CV: {(np.std(nose_widths)/np.mean(nose_widths)*100):.1f}%)")
+        print(f"   Down Nose:      {np.mean(down_noses):.1f} ± {np.std(down_noses):.1f} mm  (CV: {(np.std(down_noses)/np.mean(down_noses)*100):.1f}%)")
+        print(f"   Nose Height:    {np.mean(nose_heights):.1f} ± {np.std(nose_heights):.1f} mm  (CV: {(np.std(nose_heights)/np.mean(nose_heights)*100):.1f}%)")
     
     def run_demo(self):
         """Run live camera demo"""
@@ -209,21 +297,24 @@ class DECALiveDemo:
                     # Run DECA reconstruction
                     with torch.no_grad():
                         codedict = self.deca.encode(face_tensor)
-                        opdict, visdict = self.deca.decode(codedict)
+                        opdict = self.deca.decode(codedict)  # DECAMeasurement returns only opdict
                         
-                        # Extract 3D vertices
+                        # Extract 3D vertices AND 3D landmarks
                         vertices = opdict['verts'][0].cpu().numpy()
+                        landmarks3d = opdict['landmarks3d'][0].cpu().numpy()  # 68 3D landmarks
                         
-                        # Calculate measurements
-                        measurements = self.extract_measurements(vertices)
+                        # Calculate measurements using landmarks (more accurate)
+                        measurements = self.extract_measurements(landmarks3d, vertices)
                         
                         processing_time = time.time() - start_time
                         
-                        # Display results
-                        print(f"📏 3D Measurements (FLAME units):")
-                        print(f"   Width:  {measurements['width']:.6f}")
-                        print(f"   Height: {measurements['height']:.6f}")
-                        print(f"   Depth:  {measurements['depth']:.6f}")
+                        # Display results in MILLIMETERS
+                        print(f"📏 Nose Measurements (mm):")
+                        print(f"   Nose Width:      {measurements['nose_width_mm']:.1f} mm")
+                        print(f"   Down Nose Dist:  {measurements['down_nose_mm']:.1f} mm")
+                        print(f"   Nose Height (Z): {measurements['nose_height_z_mm']:.1f} mm")
+                        print(f"   Nose Height 3D:  {measurements['nose_height_3d_mm']:.1f} mm")
+                        print(f"   Nose to Chin:    {measurements['nose_to_chin_mm']:.1f} mm")
                         print(f"   Processing time: {processing_time:.2f}s")
                         
                         # Save measurement

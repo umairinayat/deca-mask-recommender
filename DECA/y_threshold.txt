@@ -1,0 +1,2 @@
+percentile=46.2
+vertex=1609

@@ -23,6 +23,24 @@ class CPAPMeasurementSystem:
     RESULT_DISPLAY_MS = 2000
     MAX_VERTICES = 5023
     
+    # 68-Point Landmark indices for CPAP measurements (dlib/FLAME format)
+    # These are more accurate than using mesh vertex indices
+    LMK_NOSE_LEFT = 31      # Left alar (nostril)
+    LMK_NOSE_RIGHT = 35     # Right alar (nostril)
+    LMK_CHEEK_LEFT = 4      # Left zygion (cheekbone)
+    LMK_CHEEK_RIGHT = 12    # Right zygion (cheekbone)
+    LMK_SUBNASALE = 33      # Nose base
+    LMK_CHIN = 8            # Menton (chin tip)
+    
+    # Eye landmarks for IPD calibration (use eye centers)
+    LMK_LEFT_EYE_OUTER = 36   # Left eye outer corner
+    LMK_LEFT_EYE_INNER = 39   # Left eye inner corner
+    LMK_RIGHT_EYE_INNER = 42  # Right eye inner corner
+    LMK_RIGHT_EYE_OUTER = 45  # Right eye outer corner
+    
+    # Average inter-pupillary distance for mm calibration (population average)
+    AVERAGE_IPD_MM = 63.0
+    
     def __init__(self):
         # Auto-detect GPU
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -35,13 +53,8 @@ class CPAPMeasurementSystem:
         self.session_dir = None
         self.measurement_count = 0
         
-        # FLAME vertex indices for CPAP measurements
-        self.NOSE_LEFT = 3632
-        self.NOSE_RIGHT = 3325
-        self.CHEEK_LEFT = 4478
-        self.CHEEK_RIGHT = 2051
-        self.NOSE_BASE = 175
-        self.CHIN = 152
+        # Conversion factor (calculated per-face using IPD)
+        self.conversion_factor = None
         
     def get_next_session_index(self):
         """Find the next available session index"""
@@ -145,49 +158,59 @@ class CPAPMeasurementSystem:
         
         return face_tensor, (x_min, y_min, x_max, y_max)
     
-    def extract_cpap_measurements(self, vertices):
+    def extract_cpap_measurements(self, landmarks):
         """
-        Extract 3 critical CPAP measurements from DECA vertices
+        Extract 3 critical CPAP measurements from DECA 68-point landmarks
         
         Args:
-            vertices: (5023, 3) numpy array of 3D vertices
+            landmarks: (68, 3) numpy array of 3D landmark positions
             
         Returns:
-            dict with nose_width, cheekbone_width, nose_to_chin in FLAME units
+            dict with measurements in both FLAME units and millimeters
             
         Raises:
-            ValueError: If vertex indices are out of bounds
+            ValueError: If landmark array is invalid
         """
-        # Validate vertex array
-        if vertices.shape[0] != self.MAX_VERTICES:
-            raise ValueError(f"Expected {self.MAX_VERTICES} vertices, got {vertices.shape[0]}")
+        # Validate landmark array
+        if landmarks.shape[0] != 68:
+            raise ValueError(f"Expected 68 landmarks, got {landmarks.shape[0]}")
         
-        # Validate vertex indices
-        indices = [self.NOSE_LEFT, self.NOSE_RIGHT, self.CHEEK_LEFT, 
-                   self.CHEEK_RIGHT, self.NOSE_BASE, self.CHIN]
-        for idx in indices:
-            if idx < 0 or idx >= self.MAX_VERTICES:
-                raise ValueError(f"Vertex index {idx} out of bounds (0-{self.MAX_VERTICES-1})")
+        # Calculate IPD for mm calibration using eye centers
+        # This is more accurate than using just inner or outer corners
+        left_eye_center = (landmarks[self.LMK_LEFT_EYE_OUTER] + landmarks[self.LMK_LEFT_EYE_INNER]) / 2
+        right_eye_center = (landmarks[self.LMK_RIGHT_EYE_INNER] + landmarks[self.LMK_RIGHT_EYE_OUTER]) / 2
+        ipd_flame = np.linalg.norm(left_eye_center - right_eye_center)
+        self.conversion_factor = self.AVERAGE_IPD_MM / ipd_flame
         
         # 1. Nose width (alar base) - Primary for nasal/pillow masks
-        nose_left = vertices[self.NOSE_LEFT]
-        nose_right = vertices[self.NOSE_RIGHT]
-        nose_width = np.linalg.norm(nose_left - nose_right)
+        nose_left = landmarks[self.LMK_NOSE_LEFT]
+        nose_right = landmarks[self.LMK_NOSE_RIGHT]
+        nose_width_flame = np.linalg.norm(nose_left - nose_right)
         
         # 2. Cheekbone width (zygion-zygion) - Primary for full-face masks
-        cheek_left = vertices[self.CHEEK_LEFT]
-        cheek_right = vertices[self.CHEEK_RIGHT]
-        cheekbone_width = np.linalg.norm(cheek_left - cheek_right)
+        cheek_left = landmarks[self.LMK_CHEEK_LEFT]
+        cheek_right = landmarks[self.LMK_CHEEK_RIGHT]
+        cheekbone_width_flame = np.linalg.norm(cheek_left - cheek_right)
         
         # 3. Nose-to-chin distance - Secondary check for full-face
-        nose_base = vertices[self.NOSE_BASE]
-        chin = vertices[self.CHIN]
-        nose_to_chin = np.linalg.norm(nose_base - chin)
+        subnasale = landmarks[self.LMK_SUBNASALE]
+        chin = landmarks[self.LMK_CHIN]
+        nose_to_chin_flame = np.linalg.norm(subnasale - chin)
+        
+        # Convert to millimeters
+        nose_width_mm = nose_width_flame * self.conversion_factor
+        cheekbone_width_mm = cheekbone_width_flame * self.conversion_factor
+        nose_to_chin_mm = nose_to_chin_flame * self.conversion_factor
         
         return {
-            'nose_width': float(nose_width),
-            'cheekbone_width': float(cheekbone_width),
-            'nose_to_chin': float(nose_to_chin)
+            'nose_width_flame': float(nose_width_flame),
+            'cheekbone_width_flame': float(cheekbone_width_flame),
+            'nose_to_chin_flame': float(nose_to_chin_flame),
+            'nose_width_mm': float(nose_width_mm),
+            'cheekbone_width_mm': float(cheekbone_width_mm),
+            'nose_to_chin_mm': float(nose_to_chin_mm),
+            'conversion_factor': float(self.conversion_factor),
+            'ipd_mm': float(self.AVERAGE_IPD_MM)
         }
     
     def save_measurement(self, measurements, processing_time):
@@ -202,15 +225,28 @@ class CPAPMeasurementSystem:
         data = {
             'timestamp': datetime.now().isoformat(),
             'measurement_number': self.measurement_count,
-            'measurements': measurements,
+            'measurements_mm': {
+                'nose_width': measurements['nose_width_mm'],
+                'cheekbone_width': measurements['cheekbone_width_mm'],
+                'nose_to_chin': measurements['nose_to_chin_mm']
+            },
+            'measurements_flame': {
+                'nose_width': measurements['nose_width_flame'],
+                'cheekbone_width': measurements['cheekbone_width_flame'],
+                'nose_to_chin': measurements['nose_to_chin_flame']
+            },
+            'calibration': {
+                'ipd_mm': measurements['ipd_mm'],
+                'conversion_factor': measurements['conversion_factor']
+            },
             'processing_time_seconds': processing_time,
-            'vertex_indices': {
-                'nose_left': self.NOSE_LEFT,
-                'nose_right': self.NOSE_RIGHT,
-                'cheek_left': self.CHEEK_LEFT,
-                'cheek_right': self.CHEEK_RIGHT,
-                'nose_base': self.NOSE_BASE,
-                'chin': self.CHIN
+            'landmark_indices': {
+                'nose_left': self.LMK_NOSE_LEFT,
+                'nose_right': self.LMK_NOSE_RIGHT,
+                'cheek_left': self.LMK_CHEEK_LEFT,
+                'cheek_right': self.LMK_CHEEK_RIGHT,
+                'subnasale': self.LMK_SUBNASALE,
+                'chin': self.LMK_CHIN
             }
         }
         
@@ -228,12 +264,12 @@ class CPAPMeasurementSystem:
         # Draw face bounding box
         cv2.rectangle(frame, (x_min, y_min), (x_max, y_max), (0, 255, 0), 2)
         
-        # Measurement text
+        # Measurement text (now in mm!)
         text_lines = [
-            "CPAP Measurements (FLAME units):",
-            f"1. Nose Width:      {measurements['nose_width']:.6f}",
-            f"2. Cheekbone Width: {measurements['cheekbone_width']:.6f}",
-            f"3. Nose-to-Chin:    {measurements['nose_to_chin']:.6f}",
+            "CPAP Measurements (mm):",
+            f"1. Nose Width:      {measurements['nose_width_mm']:.1f} mm",
+            f"2. Cheekbone Width: {measurements['cheekbone_width_mm']:.1f} mm",
+            f"3. Nose-to-Chin:    {measurements['nose_to_chin_mm']:.1f} mm",
             f"",
             f"Count: {self.measurement_count}"
         ]
@@ -314,19 +350,19 @@ class CPAPMeasurementSystem:
                             codedict = self.deca.encode(face_tensor)
                             opdict = self.deca.decode(codedict)
                             
-                            # Extract 3D vertices
-                            vertices = opdict['verts'][0].cpu().numpy()
+                            # Extract 68-point 3D landmarks
+                            landmarks = opdict['landmarks3d'][0].cpu().numpy()
                             
-                            # Extract CPAP measurements
-                            measurements = self.extract_cpap_measurements(vertices)
+                            # Extract CPAP measurements using landmarks
+                            measurements = self.extract_cpap_measurements(landmarks)
                             
                             processing_time = time.time() - start_time
                             
                             # Display results
                             print(f"[*] CPAP Measurements:")
-                            print(f"    Nose Width:      {measurements['nose_width']:.6f} FLAME units")
-                            print(f"    Cheekbone Width: {measurements['cheekbone_width']:.6f} FLAME units")
-                            print(f"    Nose-to-Chin:    {measurements['nose_to_chin']:.6f} FLAME units")
+                            print(f"    Nose Width:      {measurements['nose_width_mm']:.1f} mm")
+                            print(f"    Cheekbone Width: {measurements['cheekbone_width_mm']:.1f} mm")
+                            print(f"    Nose-to-Chin:    {measurements['nose_to_chin_mm']:.1f} mm")
                             print(f"    Processing time: {processing_time:.2f}s")
                             
                             # Save measurement
