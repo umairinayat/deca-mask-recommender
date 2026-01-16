@@ -1,118 +1,154 @@
-# CPAP Mask Measurement System
+# DECA Mask Recommender
 
-3D facial measurement system for CPAP mask sizing using DECA (Detailed Expression Capture and Animation).
+AI-powered CPAP mask fitting system using DECA face reconstruction. This web application analyzes facial measurements through a webcam to recommend the optimal CPAP mask size for users.
 
-## Quick Start
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![Flask](https://img.shields.io/badge/Flask-2.0%2B-green)
+![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red)
 
-### 1. Activate DECA Environment
+## Features
+
+- 🎥 **Web-based face scanning** - Records 3-second video from webcam
+- 📏 **Accurate measurements** - Uses DECA/FLAME 3D face reconstruction
+- 🎭 **Multiple mask recommendations** - Supports N10, N20, N30, N30i, F10, F20, F30, F30i, F40 masks
+- 📊 **Statistical analysis** - Averages measurements across multiple frames for accuracy
+- 💻 **Easy to use** - Simple browser-based interface
+
+## Measurements
+
+The system uses fixed FLAME mesh vertices for precise measurements:
+
+| Measurement | Vertices | Purpose |
+|-------------|----------|---------|
+| Nose Width | V3092 → V2057 | Nasal masks (N10, N20, N30, etc.) |
+| Face Height F10 | V3553 → V3487 | Quattro Air F10 mask sizing |
+| Face Height F20 | V3704 → V3487 | AirFit F20 mask sizing |
+
+## Installation
+
+### 1. Clone the repository
+
 ```bash
-conda activate deca-env
-cd DECA
+git clone https://github.com/umairinayat/deca-mask-recommender.git
+cd deca-mask-recommender
 ```
 
-### 2. Run Measurement Capture
+### 2. Create a virtual environment
+
 ```bash
-python cpap_measurement.py
-```
-- Press **SPACE** to capture measurements
-- Press **ESC** to quit
-- Results saved to `../results/<session_index>/`
+# Create environment
+python -m venv venv
 
-### 3. Validate Results
+# Activate (Windows)
+venv\Scripts\activate
+
+# Activate (Linux/Mac)
+source venv/bin/activate
+```
+
+### 3. Install dependencies
+
 ```bash
-# Validate latest session
-python validator.py
+# Install base requirements
+pip install -r requirements.txt
 
-# Validate specific session
-python validator.py 1
+# For GPU support (CUDA 11.8), install PyTorch with CUDA
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# Install pytorch3d (required for 3D operations)
+# Windows:
+pip install git+https://github.com/facebookresearch/pytorch3d.git
+
+# Or download pre-built wheel from:
+# https://github.com/facebookresearch/pytorch3d/releases
 ```
 
-## What It Measures
+### 4. Download DECA model files
 
-### 3 Critical CPAP Measurements:
+Download the required model files and place them in the `DECA/data/` folder:
 
-1. **Nose Width (Alar Base)**
-   - FLAME vertices: 3632 ↔ 3325
-   - Primary sizing for nasal & pillow masks
-   - Brands: ResMed AirFit N20/P10, F&P Brevida, Philips DreamWear
+1. **DECA model**: Download from [DECA repository](https://github.com/yfeng95/DECA)
+   - `deca_model.tar` → Extract to `DECA/data/`
+   
+2. **FLAME model**: Download from [FLAME website](https://flame.is.tue.mpg.de/)
+   - `generic_model.pkl` → Place in `DECA/data/`
+   - `FLAME_masks.pkl` → Place in `DECA/data/FLAME2020/FLAME_masks/`
 
-2. **Cheekbone Width (Zygion-Zygion)**
-   - FLAME vertices: 4478 ↔ 2051
-   - Primary sizing for full-face masks
-   - Brands: ResMed AirFit F20/F30, F&P Simplus/Vitera
+## Usage
 
-3. **Nose-to-Chin Distance (Subnasale → Menton)**
-   - FLAME vertices: 175 ↔ 152
-   - Secondary check for full-face cushion size
+### Run the Web Application
 
-## Output Format
-
-### JSON Structure
-```json
-{
-  "timestamp": "2025-11-23T00:45:30.123456",
-  "measurement_number": 1,
-  "measurements": {
-    "nose_width": 0.045123,
-    "cheekbone_width": 0.290956,
-    "nose_to_chin": 0.182337
-  },
-  "processing_time_seconds": 2.34,
-  "vertex_indices": {
-    "nose_left": 3632,
-    "nose_right": 3325,
-    "cheek_left": 4478,
-    "cheek_right": 2051,
-    "nose_base": 175,
-    "chin": 152
-  }
-}
+```bash
+python web_app.py
 ```
 
-### Validator Output
-- **Statistics**: Mean, std, CV% for each measurement
-- **Graphs**: 3 trend plots showing measurement consistency
-- **Assessment**: Consistency rating (Excellent <2%, Good <5%)
+Then open your browser to: **http://localhost:5000**
+
+### How to use:
+
+1. Allow camera access when prompted
+2. Position your face within the guide frame
+3. Click "Start Scan" button
+4. Hold still for 3 seconds while recording
+5. View your measurements and mask recommendations
+
+### Other Scripts
+
+| Script | Description |
+|--------|-------------|
+| `live_nose_width.py` | Live camera measurement (desktop) |
+| `python_app.py` | Desktop application with PyGame UI |
+| `dataset_fitmask.py` | Batch process dataset with fixed vertices |
+| `dataset_fitmask_threshold.py` | Batch process with Y-threshold method |
+| `select_y_threshold.py` | Tool to select Y-threshold value |
+| `validate_y_threshold.py` | Validate Y-threshold selection |
+
+## Supported Masks
+
+### Nasal Masks (based on nose width)
+- AirFit N10 / Swift FX Nano
+- AirFit N20
+- AirFit N30
+- AirFit N30i
+
+### Full Face Masks
+- Quattro Air F10 (based on face height F10)
+- AirFit F20 (based on face height F20)
+- AirFit F30 (based on nose width)
+- AirFit F30i (based on nose width)
+- AirFit F40 (based on nose width)
 
 ## Project Structure
 
 ```
-facial_project/
-├── DECA/                           # DECA folder (all DECA-related files)
-│   ├── cpap_measurement.py        # Main CPAP measurement capture
-│   ├── validator.py                # Visualization & statistics
-│   ├── temp.py                     # Quick consistency test
-│   ├── live_cam_demo.py            # General DECA demo
-│   ├── deca_context.md             # DECA setup documentation
-│   ├── data/                       # DECA models
-│   │   ├── deca_model.pkl
-│   │   ├── generic_model.pkl
-│   │   └── ...
-│   └── decalib/                    # DECA library code
-├── results/                        # Measurement sessions (outside DECA)
-│   ├── 1/                          # Session 1
-│   │   ├── measurement_*.json
-│   │   └── session_1_visualization.png
-│   └── 2/                          # Session 2
-├── context.md                      # Project overview
-└── README.md                       # This file
+deca-mask-recommender/
+├── web_app.py              # Main Flask web application
+├── templates/
+│   └── index.html          # Web frontend
+├── deca_measurement.py     # DECA wrapper for measurements
+├── fitmask.py              # Mask fitting logic
+├── live_nose_width.py      # Live camera measurement
+├── requirements.txt        # Python dependencies
+├── DECA/                   # DECA library
+│   ├── decalib/            # Core DECA code
+│   ├── configs/            # Configuration files
+│   └── data/               # Model files (download separately)
+└── dataset/                # Test dataset (optional)
 ```
 
-## Key Features
+## Requirements
 
-✅ **Distance-Independent**: FLAME units consistent across camera distances  
-✅ **3D Accuracy**: True anatomical measurements from 3D reconstruction  
-✅ **Pose-Robust**: Works with slight head rotation  
-✅ **Session Management**: Automatic indexing and organization  
-✅ **Validation Tools**: Statistical analysis and visualization
+- Python 3.9 or 3.10
+- CUDA GPU (recommended) or CPU
+- Webcam
+- Modern web browser (Chrome, Firefox, Edge)
 
-## Next Steps
+## License
 
-1. **Calibration**: Convert FLAME units to millimeters using reference measurements
-2. **Testing**: Validate distance independence by measuring at different distances
-3. **Integration**: Map measurements to brand-specific sizing charts (S/M/L)
+This project uses the DECA model which is for non-commercial research purposes only. See [DECA License](DECA/LICENSE) for details.
 
-## Documentation
+## Acknowledgments
 
-- `context.md` - Project overview and problem statement
-- `DECA/deca_context.md` - Detailed DECA setup and technical documentation
+- [DECA](https://github.com/yfeng95/DECA) - Detailed Expression Capture and Animation
+- [FLAME](https://flame.is.tue.mpg.de/) - Faces Learned with an Articulated Model and Expressions
+- [MediaPipe](https://google.github.io/mediapipe/) - Face mesh detection for web interface
