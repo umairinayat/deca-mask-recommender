@@ -1,0 +1,1194 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MaskFit AI | CPAP Mask Fitting</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f0f1a 0%, #1a1a2e 50%, #0f0f1a 100%);
+            min-height: 100vh;
+            color: #fff;
+            overflow-x: hidden;
+        }
+
+        /* Header */
+        .header {
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .logo {
+            font-size: 1.6rem;
+            font-weight: 700;
+        }
+
+        .logo span {
+            background: linear-gradient(135deg, #00d4ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* Main Layout */
+        .main-container {
+            display: flex;
+            min-height: calc(100vh - 80px);
+            padding: 30px;
+            gap: 30px;
+        }
+
+        /* Camera Section - LARGE DISPLAY */
+        .camera-section {
+            flex: 2;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            aspect-ratio: 4/3;
+            border-radius: 24px;
+            overflow: hidden;
+            background: linear-gradient(145deg, #1a1f2e, #0d1017);
+            box-shadow:
+                20px 20px 60px rgba(0, 0, 0, 0.5),
+                -5px -5px 30px rgba(30, 40, 60, 0.15),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(0, 212, 255, 0.15);
+        }
+
+        /* Vignette overlay - subtle and clean */
+        .vignette-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+            background: radial-gradient(ellipse 70% 80% at center,
+                    transparent 35%,
+                    rgba(10, 15, 25, 0.3) 55%,
+                    rgba(8, 12, 20, 0.55) 70%,
+                    rgba(5, 8, 15, 0.75) 85%,
+                    rgba(0, 5, 12, 0.9) 100%);
+        }
+
+        /* Scan line - HIDDEN */
+        .scan-line {
+            display: none;
+        }
+
+        @keyframes scanLine {
+            0% {
+                top: 18%;
+                opacity: 0;
+            }
+
+            10% {
+                opacity: 1;
+            }
+
+            90% {
+                opacity: 1;
+            }
+
+            100% {
+                top: 72%;
+                opacity: 0;
+            }
+        }
+
+        /* Focus ring - subtle glow */
+        .focus-ring {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 300px;
+            height: 380px;
+            border: 1px solid rgba(0, 212, 255, 0.1);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 4;
+        }
+
+        @keyframes focusPulse {
+
+            0%,
+            100% {
+                opacity: 0.5;
+                transform: translate(-50%, -50%) scale(1);
+            }
+
+            50% {
+                opacity: 0.8;
+                transform: translate(-50%, -50%) scale(1.02);
+            }
+        }
+
+        #webcam {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1);
+        }
+
+        #overlay {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            transform: scaleX(-1);
+        }
+
+        /* Face Guide Frame - Modern Clean */
+        .face-guide {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 260px;
+            height: 330px;
+            pointer-events: none;
+            transition: all 0.3s ease-out;
+            z-index: 10;
+        }
+
+        .face-guide::before {
+            content: '';
+            position: absolute;
+            top: -10px;
+            left: -10px;
+            right: -10px;
+            bottom: -10px;
+            border: 1px dashed rgba(255, 255, 255, 0.15);
+            border-radius: 50%;
+        }
+
+        .corner {
+            position: absolute;
+            width: 45px;
+            height: 45px;
+            border-style: solid;
+            border-color: rgba(0, 255, 136, 0.6);
+            transition: all 0.25s ease-out;
+        }
+
+        .corner-tl {
+            top: 0;
+            left: 0;
+            border-width: 4px 0 0 4px;
+            border-radius: 12px 0 0 0;
+        }
+
+        .corner-tr {
+            top: 0;
+            right: 0;
+            border-width: 4px 4px 0 0;
+            border-radius: 0 12px 0 0;
+        }
+
+        .corner-bl {
+            bottom: 0;
+            left: 0;
+            border-width: 0 0 4px 4px;
+            border-radius: 0 0 0 12px;
+        }
+
+        .corner-br {
+            bottom: 0;
+            right: 0;
+            border-width: 0 3px 3px 0;
+            border-radius: 0 0 10px 0;
+        }
+
+        .face-guide.detected .corner {
+            border-color: #00ff88;
+            box-shadow: 0 0 15px rgba(0, 255, 136, 0.4);
+        }
+
+        /* Quality Indicator */
+        .quality-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 15px 20px;
+            border-radius: 16px;
+        }
+
+        .quality-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .quality-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #666;
+            transition: background 0.3s;
+        }
+
+        .quality-dot.excellent {
+            background: #00ff88;
+            box-shadow: 0 0 10px #00ff88;
+        }
+
+        .quality-dot.good {
+            background: #ffd93d;
+        }
+
+        .quality-dot.poor {
+            background: #ff4757;
+        }
+
+        .quality-text {
+            font-size: 0.9rem;
+            color: #aaa;
+        }
+
+        .quality-text span {
+            color: #fff;
+            font-weight: 600;
+        }
+
+        /* Status Badge */
+        .status-badge {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 10px 18px;
+            border-radius: 30px;
+            font-size: 0.85rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00ff88;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.4;
+            }
+        }
+
+        .status-badge.recording {
+            background: rgba(255, 71, 87, 0.3);
+            border: 1px solid rgba(255, 71, 87, 0.5);
+        }
+
+        .status-badge.recording .status-dot {
+            background: #ff4757;
+        }
+
+        /* Controls */
+        .controls {
+            margin-top: 25px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .record-btn {
+            width: 180px;
+            height: 56px;
+            border: none;
+            border-radius: 28px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: linear-gradient(135deg, #00d4ff, #00ff88);
+            color: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .record-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.4);
+        }
+
+        .record-btn:disabled {
+            background: #444;
+            color: #888;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .record-btn.recording {
+            background: linear-gradient(135deg, #ff4757, #ff6b81);
+            animation: pulse-btn 1s infinite;
+        }
+
+        @keyframes pulse-btn {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.4);
+            }
+
+            50% {
+                box-shadow: 0 0 0 15px rgba(255, 71, 87, 0);
+            }
+        }
+
+        .hint-text {
+            color: #666;
+            font-size: 0.85rem;
+            text-align: center;
+        }
+
+        /* Progress Ring */
+        .progress-ring-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+
+        .progress-ring-container.active {
+            display: block;
+        }
+
+        .progress-ring {
+            width: 120px;
+            height: 120px;
+            transform: rotate(-90deg);
+        }
+
+        .progress-ring circle {
+            fill: none;
+            stroke-width: 6;
+        }
+
+        .progress-ring .bg {
+            stroke: rgba(255, 255, 255, 0.1);
+        }
+
+        .progress-ring .progress {
+            stroke: #00ff88;
+            stroke-linecap: round;
+            stroke-dasharray: 339.292;
+            stroke-dashoffset: 339.292;
+            transition: stroke-dashoffset 0.1s;
+        }
+
+        .progress-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        /* Results Panel */
+        .results-section {
+            flex: 0.8;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 24px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .section-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 20px;
+            background: linear-gradient(135deg, #00d4ff, #00ff88);
+            border-radius: 2px;
+        }
+
+        /* Measurements */
+        .measurements-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+            margin-bottom: 25px;
+        }
+
+        .measurement-card {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 18px;
+            border-radius: 16px;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .measurement-value {
+            font-size: 1.6rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #00d4ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .measurement-label {
+            font-size: 0.75rem;
+            color: #666;
+            margin-top: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Recommendations */
+        .recommendations-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .recommendation-card {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 16px;
+            padding: 18px;
+            margin-bottom: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.3s;
+        }
+
+        .recommendation-card:hover {
+            border-color: rgba(0, 212, 255, 0.3);
+            background: rgba(0, 212, 255, 0.05);
+        }
+
+        .recommendation-card.top-pick {
+            border-color: rgba(0, 255, 136, 0.4);
+            background: rgba(0, 255, 136, 0.05);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .mask-info h4 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .mask-info p {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 3px;
+        }
+
+        .size-badge {
+            background: linear-gradient(135deg, #00d4ff, #00ff88);
+            color: #000;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .top-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(0, 255, 136, 0.15);
+            color: #00ff88;
+            padding: 4px 10px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-top: 8px;
+        }
+
+        /* Waiting/Loading States */
+        .waiting-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            color: #444;
+        }
+
+        .waiting-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+        }
+
+        .waiting-state h3 {
+            color: #666;
+            margin-bottom: 8px;
+        }
+
+        .waiting-state p {
+            font-size: 0.85rem;
+            color: #444;
+        }
+
+        .processing-state {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            flex: 1;
+            text-align: center;
+        }
+
+        .processing-state.active {
+            display: flex;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(0, 212, 255, 0.2);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        @media (max-width: 1000px) {
+            .main-container {
+                flex-direction: column;
+            }
+
+            .results-section {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="header">
+        <div class="logo">Mask<span>Fit</span> AI</div>
+        <div style="color: #666; font-size: 0.85rem;">AI-Powered CPAP Mask Fitting</div>
+    </header>
+
+    <div class="main-container">
+        <!-- Camera Section -->
+        <div class="camera-section">
+            <div class="camera-container">
+                <video id="webcam" autoplay playsinline></video>
+                <canvas id="overlay"></canvas>
+
+                <!-- Vignette overlay for focus effect -->
+                <div class="vignette-overlay"></div>
+
+                <!-- Subtle scanning line -->
+                <div class="scan-line"></div>
+
+                <!-- Focus ring -->
+                <div class="focus-ring"></div>
+
+                <!-- Face Guide -->
+                <div class="face-guide" id="faceGuide">
+                    <div class="corner corner-tl"></div>
+                    <div class="corner corner-tr"></div>
+                    <div class="corner corner-bl"></div>
+                    <div class="corner corner-br"></div>
+                </div>
+
+                <!-- Status Badge -->
+                <div class="status-badge" id="statusBadge">
+                    <div class="status-dot"></div>
+                    <span id="statusText">Initializing...</span>
+                </div>
+
+                <!-- Progress Ring (during recording) -->
+                <div class="progress-ring-container" id="progressRing">
+                    <svg class="progress-ring" viewBox="0 0 120 120">
+                        <circle class="bg" cx="60" cy="60" r="54" />
+                        <circle class="progress" id="progressCircle" cx="60" cy="60" r="54" />
+                    </svg>
+                    <div class="progress-text" id="progressText">3</div>
+                </div>
+
+                <!-- Quality Panel -->
+                <div class="quality-panel">
+                    <div class="quality-info">
+                        <div class="quality-dot" id="qualityDot"></div>
+                        <div class="quality-text">
+                            Quality: <span id="qualityScore">--</span>
+                        </div>
+                    </div>
+                    <div class="quality-text" id="guidanceText">Position your face</div>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="controls">
+                <button class="record-btn" id="recordBtn" onclick="startRecording()" disabled>
+                    <span>🎬</span> Start Scan
+                </button>
+                <p class="hint-text">Align face within the frame, then click to scan</p>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div class="results-section">
+            <h2 class="section-title">Results</h2>
+
+            <div class="measurements-grid" id="measurementsGrid">
+                <div class="measurement-card">
+                    <div class="measurement-value" id="noseWidth">--</div>
+                    <div class="measurement-label">Nose Width</div>
+                </div>
+                <div class="measurement-card">
+                    <div class="measurement-value" id="faceHeightF10">--</div>
+                    <div class="measurement-label">Face Height F10</div>
+                </div>
+                <div class="measurement-card">
+                    <div class="measurement-value" id="faceHeightF20">--</div>
+                    <div class="measurement-label">Face Height F20</div>
+                </div>
+                <div class="measurement-card">
+                    <div class="measurement-value" id="framesProcessed">--</div>
+                    <div class="measurement-label">Frames Processed</div>
+                </div>
+            </div>
+
+            <h2 class="section-title">Recommended Masks</h2>
+
+            <!-- Status States (kept separate from recommendations) -->
+            <div class="waiting-state" id="waitingState">
+                <div class="waiting-icon">🎭</div>
+                <h3>Ready to Scan</h3>
+                <p>Position your face and click "Start Scan" to get personalized mask recommendations</p>
+            </div>
+
+            <div class="processing-state" id="processingState">
+                <div class="spinner"></div>
+                <h3 style="color: #666;">Analyzing...</h3>
+                <p style="color: #444; margin-top: 8px;">Processing with AI model</p>
+            </div>
+
+            <!-- Recommendation Cards Container (separate, can be safely cleared) -->
+            <div class="recommendations-list" id="recommendationsList">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let faceMesh;
+        let camera;
+        let isRecording = false;
+        let mediaRecorder;
+        let recordedChunks = [];
+        let faceDetected = false;
+        let qualityScore = 0;
+
+        const video = document.getElementById('webcam');
+        const canvas = document.getElementById('overlay');
+        const ctx = canvas.getContext('2d');
+
+        // Initialize MediaPipe Face Mesh
+        async function initFaceMesh() {
+            faceMesh = new FaceMesh({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+            });
+
+            faceMesh.setOptions({
+                maxNumFaces: 1,
+                refineLandmarks: true,
+                minDetectionConfidence: 0.5,
+                minTrackingConfidence: 0.5
+            });
+
+            faceMesh.onResults(onResults);
+
+            // Start camera
+            camera = new Camera(video, {
+                onFrame: async () => {
+                    await faceMesh.send({ image: video });
+                },
+                width: 640,
+                height: 480
+            });
+
+            camera.start();
+
+            // Set canvas size
+            canvas.width = 640;
+            canvas.height = 480;
+
+            document.getElementById('statusText').textContent = 'Ready';
+            document.getElementById('recordBtn').disabled = false;
+        }
+
+        // MediaPipe results callback
+        function onResults(results) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                faceDetected = true;
+
+                // Draw face mesh
+                drawFaceMesh(landmarks);
+
+                // Calculate quality
+                calculateQuality(landmarks);
+
+                // Update UI
+                document.getElementById('faceGuide').classList.add('detected');
+                document.getElementById('statusText').textContent = 'Face Detected';
+
+            } else {
+                faceDetected = false;
+                qualityScore = 0;
+                document.getElementById('faceGuide').classList.remove('detected');
+                document.getElementById('statusText').textContent = 'No Face';
+                updateQualityUI(0, 'Position your face in frame');
+            }
+        }
+
+        // Draw face mesh on canvas - DENSE TRIANGULAR MESH like reference
+        function drawFaceMesh(landmarks) {
+            // Teal color matching reference image
+            ctx.strokeStyle = 'rgba(0, 180, 170, 0.6)';
+            ctx.lineWidth = 0.4;
+
+            // Complete triangular tessellation - connect every landmark to neighbors
+            // This creates the dense mesh pattern seen in the reference
+
+            // Generate triangular connections for every point
+            for (let i = 0; i < landmarks.length; i++) {
+                // Connect to several nearby points to form triangles
+                const nearbyIndices = findNearbyLandmarks(landmarks, i, 8);
+                nearbyIndices.forEach(j => {
+                    if (j > i) { // Avoid drawing same line twice
+                        drawLine(landmarks, i, j);
+                    }
+                });
+            }
+
+            // Draw all vertex points
+            ctx.fillStyle = 'rgba(0, 200, 190, 0.7)';
+            for (let i = 0; i < landmarks.length; i++) {
+                const x = landmarks[i].x * canvas.width;
+                const y = landmarks[i].y * canvas.height;
+                ctx.beginPath();
+                ctx.arc(x, y, 1, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Highlight key facial features with slightly larger dots
+            ctx.fillStyle = 'rgba(0, 220, 200, 0.9)';
+
+            // Face contour
+            const faceContour = [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109];
+            faceContour.forEach(idx => {
+                if (landmarks[idx]) {
+                    ctx.beginPath();
+                    ctx.arc(landmarks[idx].x * canvas.width, landmarks[idx].y * canvas.height, 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            });
+        }
+
+        // Find N nearest landmarks to a given landmark
+        function findNearbyLandmarks(landmarks, index, count) {
+            const target = landmarks[index];
+            const distances = [];
+
+            for (let i = 0; i < landmarks.length; i++) {
+                if (i !== index) {
+                    const dx = landmarks[i].x - target.x;
+                    const dy = landmarks[i].y - target.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    distances.push({ index: i, dist });
+                }
+            }
+
+            distances.sort((a, b) => a.dist - b.dist);
+            return distances.slice(0, count).map(d => d.index);
+        }
+
+        // Helper: Draw a single line between two landmarks
+        function drawLine(landmarks, i, j) {
+            if (landmarks[i] && landmarks[j]) {
+                ctx.beginPath();
+                ctx.moveTo(landmarks[i].x * canvas.width, landmarks[i].y * canvas.height);
+                ctx.lineTo(landmarks[j].x * canvas.width, landmarks[j].y * canvas.height);
+                ctx.stroke();
+            }
+        }
+
+        // Helper: Draw connected path through multiple landmarks
+        function drawConnectedPath(landmarks, indices, closed) {
+            if (indices.length < 2) return;
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < indices.length; i++) {
+                const idx = indices[i];
+                if (landmarks[idx]) {
+                    const x = landmarks[idx].x * canvas.width;
+                    const y = landmarks[idx].y * canvas.height;
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+            }
+            if (closed && landmarks[indices[0]]) {
+                ctx.lineTo(landmarks[indices[0]].x * canvas.width, landmarks[indices[0]].y * canvas.height);
+            }
+            ctx.stroke();
+        }
+
+        // Helper: Draw a single line between two landmarks
+        function drawLine(landmarks, i, j) {
+            if (landmarks[i] && landmarks[j]) {
+                ctx.beginPath();
+                ctx.moveTo(landmarks[i].x * canvas.width, landmarks[i].y * canvas.height);
+                ctx.lineTo(landmarks[j].x * canvas.width, landmarks[j].y * canvas.height);
+                ctx.stroke();
+            }
+        }
+
+        // Helper: Draw connected path through multiple landmarks
+        function drawConnectedPath(landmarks, indices, closed) {
+            if (indices.length < 2) return;
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < indices.length; i++) {
+                const idx = indices[i];
+                if (landmarks[idx]) {
+                    const x = landmarks[idx].x * canvas.width;
+                    const y = landmarks[idx].y * canvas.height;
+                    if (!started) {
+                        ctx.moveTo(x, y);
+                        started = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
+                }
+            }
+            if (closed && landmarks[indices[0]]) {
+                ctx.lineTo(landmarks[indices[0]].x * canvas.width, landmarks[indices[0]].y * canvas.height);
+            }
+            ctx.stroke();
+        }
+
+        // Calculate quality score
+        function calculateQuality(landmarks) {
+            const nose = landmarks[1]; // Nose tip
+
+            // Check centering (0-40 points)
+            const centerX = Math.abs(nose.x - 0.5);
+            const centerY = Math.abs(nose.y - 0.5);
+            const centerScore = Math.max(0, 40 - (centerX + centerY) * 100);
+
+            // Check face size (0-30 points)
+            const leftCheek = landmarks[234];
+            const rightCheek = landmarks[454];
+            const faceWidth = Math.abs(rightCheek.x - leftCheek.x);
+            const sizeScore = faceWidth > 0.25 && faceWidth < 0.6 ? 30 : 15;
+
+            // Check face angle (0-30 points) - simplified
+            const foreheadY = landmarks[10].y;
+            const chinY = landmarks[152].y;
+            const faceHeight = chinY - foreheadY;
+            const angleScore = faceHeight > 0.2 ? 30 : 15;
+
+            qualityScore = Math.round(centerScore + sizeScore + angleScore);
+
+            // Update UI
+            let guidance = 'Perfect! Ready to scan';
+            if (centerScore < 30) guidance = 'Center your face';
+            else if (sizeScore < 25) guidance = faceWidth < 0.25 ? 'Move closer' : 'Move back';
+
+            updateQualityUI(qualityScore, guidance);
+        }
+
+        // Update quality UI
+        function updateQualityUI(score, text) {
+            const dot = document.getElementById('qualityDot');
+            document.getElementById('qualityScore').textContent = score + '%';
+            document.getElementById('guidanceText').textContent = text;
+
+            dot.className = 'quality-dot';
+            if (score >= 80) dot.classList.add('excellent');
+            else if (score >= 50) dot.classList.add('good');
+            else dot.classList.add('poor');
+        }
+
+        // Recording settings
+        const RECORD_DURATION = 3;  // Record 3 seconds total
+        const FRAMES_TO_CAPTURE = 8; // Capture 8 frames during recording
+
+        // Start recording
+        async function startRecording() {
+            console.log('startRecording called, isRecording:', isRecording, 'faceDetected:', faceDetected);
+
+            if (isRecording) {
+                console.log('Already recording, ignoring');
+                return;
+            }
+
+            if (!faceDetected) {
+                alert('Please position your face in the frame first');
+                return;
+            }
+
+            isRecording = true;
+            recordedChunks = [];  // Clear previous frames
+
+            const btn = document.getElementById('recordBtn');
+            const badge = document.getElementById('statusBadge');
+            const progressContainer = document.getElementById('progressRing');
+            const progressCircle = document.getElementById('progressCircle');
+            const progressText = document.getElementById('progressText');
+
+            btn.innerHTML = '<span>⏺</span> Recording 3s...';
+            btn.classList.add('recording');
+            btn.disabled = true;
+            badge.classList.add('recording');
+            document.getElementById('statusText').textContent = 'Recording';
+            progressContainer.classList.add('active');
+
+            // Reset progress circle
+            progressCircle.style.strokeDashoffset = 339.292;
+
+            // 3 second countdown, capture frames throughout
+            let remaining = RECORD_DURATION;
+            const captureInterval = (RECORD_DURATION * 1000) / FRAMES_TO_CAPTURE;
+            let captureTimer = null;
+            let framesCaptured = 0;
+            const circumference = 2 * Math.PI * 54;
+
+            const countdown = setInterval(() => {
+                remaining -= 0.1;
+                const offset = circumference * (1 - (RECORD_DURATION - remaining) / RECORD_DURATION);
+                progressCircle.style.strokeDashoffset = offset;
+                progressText.textContent = Math.ceil(remaining);
+
+                // Start capturing frames immediately
+                if (!captureTimer) {
+                    document.getElementById('statusText').textContent = 'Capturing frames...';
+
+                    captureTimer = setInterval(() => {
+                        if (framesCaptured < FRAMES_TO_CAPTURE) {
+                            captureFrame();
+                            framesCaptured++;
+                            console.log(`Captured frame ${framesCaptured}/${FRAMES_TO_CAPTURE}`);
+                        }
+                    }, captureInterval);
+                }
+
+                if (remaining <= 0) {
+                    clearInterval(countdown);
+                    if (captureTimer) clearInterval(captureTimer);
+
+                    progressContainer.classList.remove('active');
+                    badge.classList.remove('recording');
+                    btn.classList.remove('recording');
+                    btn.innerHTML = '<span>⏳</span> Processing...';
+                    document.getElementById('statusText').textContent = 'Sending to server';
+
+                    console.log(`Total frames captured: ${recordedChunks.length}`);
+
+                    // Reset isRecording BEFORE sending to allow future recordings
+                    isRecording = false;
+
+                    sendFramesToServer();
+                }
+            }, 100);
+        }
+
+        // Capture a single frame as JPEG
+        function captureFrame() {
+            const captureCanvas = document.createElement('canvas');
+            captureCanvas.width = video.videoWidth || 640;
+            captureCanvas.height = video.videoHeight || 480;
+
+            const captureCtx = captureCanvas.getContext('2d');
+            // Flip horizontally to undo the CSS mirror
+            captureCtx.translate(captureCanvas.width, 0);
+            captureCtx.scale(-1, 1);
+            captureCtx.drawImage(video, 0, 0);
+
+            const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.9);
+            recordedChunks.push(dataUrl);
+        }
+
+        // Send frames to server
+        async function sendFramesToServer() {
+            console.log('=== sendFramesToServer START ===');
+            console.log('recordedChunks.length:', recordedChunks.length);
+
+            // Check if we have frames to send
+            if (!recordedChunks || recordedChunks.length === 0) {
+                console.error('No frames captured!');
+                alert('No frames were captured. Please try again.');
+                resetUI();
+                return;
+            }
+
+            document.getElementById('waitingState').classList.add('hidden');
+            document.getElementById('processingState').classList.add('active');
+
+            try {
+                console.log('Sending POST request to /process_frames...');
+                const response = await fetch('/process_frames', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ frames: recordedChunks })
+                });
+
+                console.log('Response received. Status:', response.status);
+
+                // Check if response is OK
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Server error response:', errorText);
+                    alert('Server error: ' + response.status + ' - ' + errorText);
+                    resetUI();
+                    return;
+                }
+
+                const data = await response.json();
+                console.log('Parsed JSON data:', data);
+
+                if (data.success) {
+                    displayResults(data);
+                } else {
+                    alert('Error: ' + (data.error || 'Processing failed'));
+                    resetUI();
+                }
+            } catch (err) {
+                console.error('=== FETCH ERROR ===');
+                console.error('Error name:', err.name);
+                console.error('Error message:', err.message);
+                console.error('Full error:', err);
+                alert('Network error: ' + err.message);
+                resetUI();
+            }
+        }
+
+        // Display results
+        function displayResults(data) {
+            document.getElementById('processingState').classList.remove('active');
+
+            // Update measurements
+            document.getElementById('noseWidth').textContent = data.averages.nose_width + ' mm';
+            document.getElementById('faceHeightF10').textContent = data.averages.face_height_f10 + ' mm';
+            document.getElementById('faceHeightF20').textContent = data.averages.face_height_f20 + ' mm';
+            document.getElementById('framesProcessed').textContent = data.frames_processed;
+
+            // Display recommendations
+            const list = document.getElementById('recommendationsList');
+            list.innerHTML = '';
+
+            data.recommendations.forEach((rec, index) => {
+                const isTop = index === 0;
+                const card = document.createElement('div');
+                card.className = `recommendation-card ${isTop ? 'top-pick' : ''}`;
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div class="mask-info">
+                            <h4>${rec.name}</h4>
+                            <p>${rec.type}</p>
+                            ${isTop ? '<div class="top-badge">⭐ Best Match</div>' : ''}
+                        </div>
+                        <div class="size-badge">${rec.recommended_size}</div>
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+
+            resetUI();
+        }
+
+        // Reset UI
+        function resetUI() {
+            console.log('Resetting UI, setting isRecording to false');
+            isRecording = false;
+            recordedChunks = [];  // Clear frames
+
+            const btn = document.getElementById('recordBtn');
+            btn.innerHTML = '<span>🎬</span> Scan Again';
+            btn.disabled = false;
+            btn.classList.remove('recording');
+
+            document.getElementById('statusText').textContent = 'Ready';
+            document.getElementById('processingState').classList.remove('active');
+        }
+
+        // Initialize
+        initFaceMesh();
+    </script>
+</body>
+
+</html>
