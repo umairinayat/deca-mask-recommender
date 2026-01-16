@@ -92,17 +92,6 @@ Then open your browser to: **http://localhost:5000**
 4. Hold still for 3 seconds while recording
 5. View your measurements and mask recommendations
 
-### Other Scripts
-
-| Script | Description |
-|--------|-------------|
-| `live_nose_width.py` | Live camera measurement (desktop) |
-| `python_app.py` | Desktop application with PyGame UI |
-| `dataset_fitmask.py` | Batch process dataset with fixed vertices |
-| `dataset_fitmask_threshold.py` | Batch process with Y-threshold method |
-| `select_y_threshold.py` | Tool to select Y-threshold value |
-| `validate_y_threshold.py` | Validate Y-threshold selection |
-
 ## Supported Masks
 
 ### Nasal Masks (based on nose width)
@@ -123,18 +112,32 @@ Then open your browser to: **http://localhost:5000**
 ```
 deca-mask-recommender/
 ├── web_app.py              # Main Flask web application
+├── deca_measurement.py     # DECA wrapper for measurements
+├── requirements.txt        # Python dependencies
 ├── templates/
 │   └── index.html          # Web frontend
-├── deca_measurement.py     # DECA wrapper for measurements
-├── fitmask.py              # Mask fitting logic
-├── live_nose_width.py      # Live camera measurement
-├── requirements.txt        # Python dependencies
+├── tools/                  # Utility scripts (see tools/README.md)
+│   ├── fitmask.py          # Standalone mask fitting
+│   ├── live_nose_width.py  # Live camera measurement
+│   ├── python_app.py       # Desktop application
+│   ├── dataset_fitmask.py  # Dataset batch processing
+│   └── ...                 # Other utilities
 ├── DECA/                   # DECA library
 │   ├── decalib/            # Core DECA code
 │   ├── configs/            # Configuration files
 │   └── data/               # Model files (download separately)
 └── dataset/                # Test dataset (optional)
 ```
+
+## Additional Tools
+
+The `tools/` folder contains utility scripts for development and testing:
+
+- **Live measurement tools** - Camera-based measurement scripts
+- **Dataset processing** - Batch processing for multiple images
+- **Y-threshold tools** - Threshold selection and validation
+
+See `tools/README.md` for details.
 
 ## Requirements
 
